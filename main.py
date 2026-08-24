@@ -5,8 +5,16 @@
 
 from flask import Flask, request, jsonify
 import json
+from sqlalchemy import create_engine
+from models import Base
 
 app =Flask(__name__)
+
+#creating a connection to the database
+engine = create_engine("sqlite:///./flask_duka_api.db", echo=True)
+
+#create tables into sqlalchemy
+Base.metadata.create_all(engine)
 
 @app.route("/")
 def home():
