@@ -83,5 +83,75 @@ def products():
     else:
         error = {"Error":"Method not allowed"}
         return jsonify(error),405
+
+
+@app.route("/purchases", methods=["POST", "GET"])
+def purchases():
+
+    if request.method == "GET":
+        # fetch purchases from the database
+        query = select(Purchase)
+        purchases = session.scalars(query)
+
+        results = []
+
+        for purchase in purchases:
+            p = {
+                "id": purchase.id,
+                "product_id": purchase.product_id,
+                "quantity": purchase.quantity,
+                "buying_price": purchase.buying_price,
+                "total_price": purchase.total_price
+            }
+
+            results.append(p)
+
+        return jsonify(results), 200
+
+    elif request.method == "POST":
+        data = request.get_json()
+
+        # check if all fields are provided
+        if (
+            data["product_id"] == ""
+            or data["quantity"] == ""
+            or data["buying_price"] == ""
+        ):
+            error = {
+                "Error": "Ensure all fields are set"
+            }
+
+            return jsonify(error), 403
+
+        else:
+            # calculate total price
+            total_price = (
+                float(data["quantity"]) *
+                float(data["buying_price"])
+            )
+
+            # store purchase in the database
+            new_purchase = Purchase(
+                user_id=user["id"],
+                product_id=data["product_id"],
+                quantity=int(data["quantity"]),
+                buying_price=float(data["buying_price"]),
+                total_price=total_price
+            )
+
+            session.add(new_purchase)
+            session.commit()
+
+            return jsonify({
+                "message": "Purchase added successfully"
+            }), 201
+
+    else:
+        error = {
+            "Error": "Method not allowed"
+        }
+
+        return jsonify(error), 405
+
     
 app.run(debug=True)    
