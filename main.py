@@ -14,12 +14,17 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, Integer, DateTime
 from sqlalchemy.orm import declarative_base
+from flask_jwt_extended import JWTManager, jwt_required, create_access_token,get_jwt_identity
 
 app =Flask(__name__)
+
+app.config["JWT_SECRET_KEY"]="marto1234"
 
 Base = declarative_base()
 
 bcrypt = Bcrypt(app)
+
+jwt = JWTManager(app)
 
 #creating a connection to the database
 engine = create_engine("sqlite:///./flask_duka_api.db", echo=True)
@@ -58,7 +63,10 @@ def home():
         return jsonify(error), 403
 
 @app.route("/products", methods=["POST", "GET"])
+@jwt_required()
 def products():
+    email=get_jwt_identity()
+    user=session.scalars(select(User).where(User.email==email))
     if request.method=="GET":
        #fetch data from the database
         query = select(Product)
@@ -205,7 +213,7 @@ def login():
     # Check email/password combination
     if not user or not bcrypt.check_password_hash(user.password, password):
         return jsonify({"error": "Invalid email or password"}), 401
-
+    token = create_access_token(identity=email)
     # Successful login
     return jsonify({"message": "logged in successfully"}), 200
 
@@ -248,7 +256,8 @@ def register():
 
     session.add(new_user)
     session.commit()
+    token = create_access_token(identity=data["email"])
 
-    return jsonify({"message": "user created successfully"}), 201
+    return jsonify({"message": "user created successfully", "token":token}), 201
 
 app.run(debug=True)    
