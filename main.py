@@ -177,10 +177,7 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(200), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=datetime.utcnow
-    )
+    
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -210,7 +207,7 @@ def login():
         return jsonify({"error": "Invalid email or password"}), 401
 
     # Successful login
-    return jsonify({"id": user.id}), 200
+    return jsonify({"message": "logged in successfully"}), 200
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -252,6 +249,6 @@ def register():
     session.add(new_user)
     session.commit()
 
-    return jsonify({"id": new_user.id}), 201
+    return jsonify({"message": "user created successfully"}), 201
 
 app.run(debug=True)    
