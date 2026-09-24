@@ -4,6 +4,7 @@
 # It has to return data as JSON(key:value pairs).
 
 from flask import Flask, request, jsonify
+import sentry_sdk
 import json
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
@@ -15,8 +16,21 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import String, Integer, DateTime
 from sqlalchemy.orm import declarative_base
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token,get_jwt_identity
+from flask_cors import CORS
+
+sentry_sdk.init(
+    dsn="https://3648ed24f28f85f3c1e9ff11a7ba8893@o4512046005223424.ingest.de.sentry.io/4512046187348048",
+    # Add data like request headers and IP for users,
+    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+    send_default_pii=True,
+)
 
 app =Flask(__name__)
+
+CORS(app,resources={ r"/*":{
+    "origins":"*",
+    "allow_headers":["Content-Type","Authorization"]
+}})
 
 app.config["JWT_SECRET_KEY"]="marto1234"
 
@@ -41,6 +55,8 @@ user = {"id":"1",
         "password":"1234",
         "phone_number":"0723456789"}
 
+allowed_method=["get", "post", "put", "delete", "patch", "head", "options"]
+
 @app.before_request
 def before_request():
     try:
@@ -53,7 +69,7 @@ def before_request():
     except:
         print("Error found")
 
-@app.route("/")
+@app.route("/", methods=allowed_method)
 def home():
     if request.method == 'GET':
         data = {"Flask API" : "Version 1"}
@@ -61,6 +77,79 @@ def home():
     else:
         error = {"Error" : "Method not allowed"}
         return jsonify(error), 403
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+
+    if request.method == "GET":
+        return jsonify({"message": "Login endpoint"}), 405
+
+    data = request.get_json()
+
+    # Check that data was provided
+    if not data:
+        return jsonify({"error": "Request body is required"}), 403
+
+    # Check email and password
+    if not data.get("email") or not data.get("password"):
+        return jsonify({"error": "Email and password are required"}), 403
+
+    email = data["email"]
+    password = data["password"]
+
+    # Find user by email
+    query = select(User).where(User.email == email)
+    user = session.scalar(query)
+
+    # Check email/password combination
+    if not user or not bcrypt.check_password_hash(user.password, password):
+        return jsonify({"error": "Invalid email or password"}), 401
+    token = create_access_token(identity=email)
+    # Successful login
+    return jsonify({"message": "logged in successfully"}), 200
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+
+    if request.method == "GET":
+        return jsonify({"message": "Registration endpoint"}), 405
+
+    data = request.get_json()
+
+    # Check that data was provided
+    #if not data:
+        #return jsonify({"error": "Request body is required"}), 403
+
+    # Check required fields
+    if not data["full_name" ]or not data["email"] or not data["password"]:
+        return jsonify({"error": "Full name, email and password are required"}), 403
+
+    full_name = data["full_name"]
+    email = data["email"]
+    password = data["password"]
+
+    # Check whether email already exists
+    query = select(User).where(User.email == email)
+    existing_user = session.scalar(query)
+
+    if existing_user:
+        return jsonify({"error": "Email already exists"}), 403
+
+    # Hash password
+    hashed_password = bcrypt.generate_password_hash(password).decode("utf-8")
+
+    # Create user
+    new_user = User(
+        full_name=full_name,
+        email=email,
+        password=hashed_password
+    )
+
+    session.add(new_user)
+    session.commit()
+    token = create_access_token(identity=data["email"])
+
+    return jsonify({"message": "user created successfully", "token":token}), 201    
 
 @app.route("/products", methods=["POST", "GET"])
 @jwt_required()
@@ -186,78 +275,4 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(200), nullable=False)
     
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-
-    if request.method == "GET":
-        return jsonify({"message": "Login endpoint"}), 405
-
-    data = request.get_json()
-
-    # Check that data was provided
-    if not data:
-        return jsonify({"error": "Request body is required"}), 403
-
-    # Check email and password
-    if not data.get("email") or not data.get("password"):
-        return jsonify({"error": "Email and password are required"}), 403
-
-    email = data["email"]
-    password = data["password"]
-
-    # Find user by email
-    query = select(User).where(User.email == email)
-    user = session.scalar(query)
-
-    # Check email/password combination
-    if not user or not bcrypt.check_password_hash(user.password, password):
-        return jsonify({"error": "Invalid email or password"}), 401
-    token = create_access_token(identity=email)
-    # Successful login
-    return jsonify({"message": "logged in successfully"}), 200
-
-@app.route("/register", methods=["GET", "POST"])
-def register():
-
-    if request.method == "GET":
-        return jsonify({"message": "Registration endpoint"}), 405
-
-    data = request.get_json()
-
-    # Check that data was provided
-    if not data:
-        return jsonify({"error": "Request body is required"}), 403
-
-    # Check required fields
-    if not data.get("full_name") or not data.get("email") or not data.get("password"):
-        return jsonify({"error": "Full name, email and password are required"}), 403
-
-    full_name = data["full_name"]
-    email = data["email"]
-    password = data["password"]
-
-    # Check whether email already exists
-    query = select(User).where(User.email == email)
-    existing_user = session.scalar(query)
-
-    if existing_user:
-        return jsonify({"error": "Email already exists"}), 403
-
-    # Hash password
-    hashed_password = bcrypt.generate_password_hash(password).decode("utf-8")
-
-    # Create user
-    new_user = User(
-        full_name=full_name,
-        email=email,
-        password=hashed_password
-    )
-
-    session.add(new_user)
-    session.commit()
-    token = create_access_token(identity=data["email"])
-
-    return jsonify({"message": "user created successfully", "token":token}), 201
-
 app.run(debug=True)    
