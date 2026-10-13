@@ -1,0 +1,7 @@
+consumer_key="O9ZjLCdhKHREJpp3MoUA3JCXsUiqGaxmfU5qlJGYkiDHIFjO"
+consumer_secret="bvjxrTAghdqpV7kKT9bQiOGYvuGb5YQq38jRTqGY3vZQERRbs3GeINAO7PDm4DAE"
+saf_api_url="https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials"
+saf_pass_key="bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919"
+saf_stk_push_api="https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest"
+my_callback_url=""
+saf_short_code="174379"

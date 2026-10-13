@@ -4,7 +4,8 @@ import sentry_sdk
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from models import Base, Product, User, Purchase, Payments, Sales, SalesDetails
+from models import Base, Product, User, Purchase, Payment, Sales, SalesDetails
+from mpesa import make_stk_push
 
 from flask_bcrypt import Bcrypt
 
@@ -43,7 +44,9 @@ CORS(
     app,
     resources={
         r"/*": {
-            "origins": "http://127.0.0.1:5500",
+            "origins": [
+                "*"
+            ],
             "allow_headers": [
                 "Content-Type",
                 "Authorization"
@@ -51,7 +54,6 @@ CORS(
         }
     }
 )
-
 
 # =====================================================
 # JWT
@@ -82,7 +84,6 @@ Base.metadata.create_all(engine)
 
 session = Session(engine)
 
-
 # =====================================================
 # HOME
 # =====================================================
@@ -102,40 +103,31 @@ def home():
 @app.route("/register", methods=["POST"])
 def register():
 
-    # Get JSON data
     data = request.get_json()
 
     print("Registration data:", data)
 
-    # Check whether data was sent
     if not data:
 
         return jsonify({
             "error": "Request body is required"
         }), 403
 
-
-    # Get values
     full_name = data.get("full_name")
     email = data.get("email")
     password = data.get("password")
 
-
-    # Check required fields
     if not full_name or not email or not password:
 
         return jsonify({
             "error": "Full name, email and password are required"
         }), 403
 
-
-    # Check whether email already exists
     query = select(User).where(
         User.email == email
     )
 
     existing_user = session.scalar(query)
-
 
     if existing_user:
 
@@ -143,33 +135,24 @@ def register():
             "error": "Email already exists"
         }), 403
 
-
-    # Hash password
     hashed_password = bcrypt.generate_password_hash(
         password
     ).decode("utf-8")
 
-
-    # Create new user
     new_user = User(
         full_name=full_name,
         email=email,
         password=hashed_password
     )
 
-
-    # Save user
     session.add(new_user)
+
     session.commit()
 
-
-    # Create JWT token
     token = create_access_token(
         identity=email
     )
 
-
-    # Return response
     return jsonify({
         "message": "User created successfully",
         "token": token
@@ -183,48 +166,35 @@ def register():
 @app.route("/login", methods=["POST"])
 def login():
 
-    # Get JSON data
     data = request.get_json()
 
-
-    # Check data
     if not data:
 
         return jsonify({
             "error": "Request body is required"
         }), 403
 
-
-    # Get values
     email = data.get("email")
     password = data.get("password")
 
-
-    # Check fields
     if not email or not password:
 
         return jsonify({
             "error": "Email and password are required"
         }), 403
 
-
-    # Find user
     query = select(User).where(
         User.email == email
     )
 
     user = session.scalar(query)
 
-
-    # Check user
     if not user:
 
         return jsonify({
             "error": "Invalid email or password"
         }), 401
 
-
-    # Check password
     if not bcrypt.check_password_hash(
         user.password,
         password
@@ -234,12 +204,9 @@ def login():
             "error": "Invalid email or password"
         }), 401
 
-
-    # Create token
     token = create_access_token(
         identity=email
     )
-
 
     return jsonify({
         "message": "Logged in successfully",
@@ -255,30 +222,40 @@ def login():
 @jwt_required()
 def products():
 
-    # Get logged-in user's email
+    # -----------------------------------------------
+    # GET LOGGED-IN USER
+    # -----------------------------------------------
+
     email = get_jwt_identity()
 
-
-    # Find logged-in user
     user = session.scalar(
         select(User).where(
             User.email == email
         )
     )
 
+    if not user:
 
+        return jsonify({
+            "error": "User not found"
+        }), 404
+
+    #if request.method == "OPTIONS":
+
+       # return = ""
     # =================================================
     # GET PRODUCTS
     # =================================================
 
     if request.method == "GET":
 
-        query = select(Product)
+        query = select(Product).where(
+            Product.user_id == user.id
+        )
 
         products_list = session.scalars(query)
 
         results = []
-
 
         for product in products_list:
 
@@ -293,182 +270,224 @@ def products():
                     product.buying_price,
 
                 "selling_price":
-                    product.selling_price
+                    product.selling_price,    
 
             })
 
-
         return jsonify(results), 200
 
-
-    # =================================================
-    # ADD PRODUCT
-    # =================================================
+    
+    # -----------------------------------------------
+    # CREATE PRODUCT
+    # -----------------------------------------------
 
     data = request.get_json()
-
-
-    if not data:
-
-        return jsonify({
-            "error": "Request body is required"
-        }), 403
-
-
-    product_name = data.get("product_name")
-    buying_price = data.get("buying_price")
-    selling_price = data.get("selling_price")
-
-
-    if not product_name or not buying_price or not selling_price:
-
-        return jsonify({
-            "error": "Ensure all fields are set"
-        }), 403
-
-
     new_product = Product(
 
-        user_id=user.id,
+        product_name=data["product_name"],
 
-        product_name=product_name,
+        selling_price=float(data["selling_price"]),
 
-        buying_price=float(
-            buying_price
-        ),
+        buying_price=float(data["buying_price"]),
 
-        selling_price=float(
-            selling_price
-        )
+
     )
-
-
     session.add(new_product)
 
     session.commit()
 
+    session.refresh(new_product)
+
 
     return jsonify({
-        "message": "Product added successfully"
+
+        "message":
+            "Product added successfully",
+
+        "product": {
+
+            "id":
+                new_product.id,
+
+            "product_name":
+                new_product.product_name,
+
+            "buying_price":
+                new_product.buying_price,
+
+            "selling_price":
+                new_product.selling_price,
+                
+
+
+        }
+
     }), 201
 
 
 # =====================================================
-# PURCHASES
+# UPDATE PRODUCT
 # =====================================================
 
-@app.route("/purchases", methods=["GET", "POST"])
+@app.route(
+    "/products/<int:product_id>",
+    methods=["PUT"]
+)
 @jwt_required()
-def purchases():
+def update_product(product_id):
 
-    # Get logged-in user's email
+    # -----------------------------------------------
+    # GET LOGGED-IN USER
+    # -----------------------------------------------
+
     email = get_jwt_identity()
 
-
-    # Find logged-in user
     user = session.scalar(
         select(User).where(
             User.email == email
         )
     )
 
+    if not user:
 
-    # =================================================
-    # GET PURCHASES
-    # =================================================
-
-    if request.method == "GET":
-
-        query = select(Purchase)
-
-        purchases_list = session.scalars(query)
-
-        results = []
+        return jsonify({
+            "error": "User not found"
+        }), 404
 
 
-        for purchase in purchases_list:
+    # -----------------------------------------------
+    # FIND PRODUCT
+    # -----------------------------------------------
 
-            results.append({
+    product = session.scalar(
 
-                "id": purchase.id,
+        select(Product).where(
 
-                "product_id":
-                    purchase.product_id,
+            Product.id == product_id,
 
-                "quantity":
-                    purchase.quantity,
+            Product.user_id == user.id
 
-                "buying_price":
-                    purchase.buying_price,
+        )
 
-                "total_price":
-                    purchase.total_price
-
-            })
+    )
 
 
-        return jsonify(results), 200
+    if not product:
+
+        return jsonify({
+            "error": "Product not found"
+        }), 404
 
 
-    # =================================================
-    # ADD PURCHASE
-    # =================================================
+    # -----------------------------------------------
+    # GET JSON
+    # -----------------------------------------------
 
     data = request.get_json()
-
 
     if not data:
 
         return jsonify({
             "error": "Request body is required"
-        }), 403
+        }), 400
 
 
-    product_id = data.get("product_id")
-    quantity = data.get("quantity")
-    buying_price = data.get("buying_price")
+    product_name = data.get("product_name")
+
+    amount = data.get("amount")
 
 
-    if not product_id or not quantity or not buying_price:
+    # -----------------------------------------------
+    # VALIDATE
+    # -----------------------------------------------
+
+    if not product_name or amount is None:
 
         return jsonify({
-            "error": "Ensure all fields are set"
-        }), 403
+            "error":
+                "Product name and amount are required"
+        }), 400
 
 
-    # Calculate total
-    total_price = (
-        float(quantity)
-        *
-        float(buying_price)
-    )
+    try:
+
+        amount = float(amount)
+
+    except (ValueError, TypeError):
+
+        return jsonify({
+            "error":
+                "Amount must be a number"
+        }), 400
 
 
-    # Create purchase
-    new_purchase = Purchase(
+    if amount < 0:
 
-        user_id=user.id,
-
-        product_id=product_id,
-
-        quantity=int(quantity),
-
-        buying_price=float(
-            buying_price
-        ),
-
-        total_price=total_price
-    )
+        return jsonify({
+            "error":
+                "Amount cannot be negative"
+        }), 400
 
 
-    session.add(new_purchase)
+    # -----------------------------------------------
+    # UPDATE PRODUCT
+    # -----------------------------------------------
+
+    product.product_name = product_name
+
+    product.selling_price = amount
+
 
     session.commit()
 
+    session.refresh(product)
+
+
+    # -----------------------------------------------
+    # RETURN UPDATED PRODUCT
+    # -----------------------------------------------
 
     return jsonify({
-        "message": "Purchase added successfully"
-    }), 201
+
+        "message":
+            "Product updated successfully",
+
+        "product": {
+
+            "id":
+                product.id,
+
+            "product_name":
+                product.product_name,
+
+            "amount":
+                product.selling_price,
+
+            
+
+        }
+
+    }), 200
+
+@app.route("/stk_push", methods = ["POST"])
+def stk_push(payload):
+
+    try:
+        print(payload)
+        response = make_stk_push(payload)
+        new_payment = Payment(sale_id=payload["sale_id"],
+                              amount_paid=payload["amount_paid"],
+                              phone_number=payload["phone_number"],
+                              mrid=response.get("MerchantRequestID",),
+                              crid=response.get("CheckoutRequestID"),
+                              status="pending")
+        session.add(new_payment)
+        session.commit()
+        return {"stk push initiated"}
+
+    except Exception as e:
+        print("stk push error")
+        return {"stk_push error", e}
 
 
 # =====================================================
